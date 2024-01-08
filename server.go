@@ -1,7 +1,6 @@
 package tunneloverquic
 
 import (
-	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -22,7 +21,7 @@ var (
 	errFirstConn  = errors.New("the first connection must be used for authorization verification")
 )
 
-type Hijacker func() (net.Conn, *bufio.ReadWriter, error)
+type Hijacker func(msg *Message, str quic.Stream) (next bool)
 type Authorizer func(msg []byte) (clientKey string, authed bool, err error)
 type TLSConfigurator func() *tls.Config
 type QuicConfigurator func() *quic.Config
@@ -64,6 +63,7 @@ func defaultTLSConfig() *tls.Config {
 
 type Server struct {
 	serverAddr string
+	hijacker   Hijacker
 	Sessions   SessionManager
 	authorizer Authorizer
 	tlsConfig  TLSConfigurator
@@ -77,63 +77,64 @@ func NewServer(addr string) *Server {
 		quicConfig: defaultQuicConfig,
 	}
 }
-func (l *Server) SetAuthorizer(auth Authorizer) *Server {
-	l.authorizer = auth
-	return l
+func (s *Server) SetAuthorizer(auth Authorizer) *Server {
+	s.authorizer = auth
+	return s
 }
 
-func (l *Server) SetTlsConfig(tlsCfg TLSConfigurator) *Server {
-	l.tlsConfig = tlsCfg
-	return l
+func (s *Server) SetTlsConfig(tlsCfg TLSConfigurator) *Server {
+	s.tlsConfig = tlsCfg
+	return s
 }
 
-func (l *Server) SetQuicConfig(quicCfg QuicConfigurator) *Server {
-	l.quicConfig = quicCfg
-	return l
+func (s *Server) SetQuicConfig(quicCfg QuicConfigurator) *Server {
+	s.quicConfig = quicCfg
+	return s
 }
 
-func (l *Server) Run() {
-	ln, err := quic.ListenAddr(l.serverAddr, l.tlsConfig(), &quic.Config{})
+func (s *Server) Run() {
+	ln, err := quic.ListenAddr(s.serverAddr, s.tlsConfig(), &quic.Config{})
 	if err != nil {
 		panic(err)
 	}
+	println("quic listen on: " + s.serverAddr)
 	for {
 		conn, err := ln.Accept(context.Background())
 		if err != nil {
 			log.Print(err.Error())
 			continue
 		}
-		go l.handle(conn)
+		go s.handle(conn)
 	}
 }
 
-func (l *Server) handle(conn quic.Connection) {
-	streamHandle := &StreamHandle{
-		server: l,
-		conn:   conn,
+func (s *Server) handle(conn quic.Connection) {
+	streamHandle := &ConnectHandle{
+		hijacker: s.hijacker,
+		Conn:     conn,
 	}
-	streamHandle.connHandle()
+	streamHandle.ConnHandle(s.authorizer)
 }
 
-type StreamHandle struct {
-	server    *Server
+type ConnectHandle struct {
 	clientKey string
-	conn      quic.Connection
+	hijacker  Hijacker
+	Conn      quic.Connection
 }
 
-func (l *StreamHandle) connHandle() {
+func (l *ConnectHandle) ConnHandle(auth Authorizer) {
 	first := true
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for {
-		str, err := l.conn.AcceptStream(ctx) // for bidirectional streams
+		str, err := l.Conn.AcceptStream(ctx) // for bidirectional streams
 		var nerr net.Error
 		if errors.As(err, &nerr) && nerr.Timeout() {
-			// TODO  日志答应
+			// TODO logger print
 			return
 		}
 		if first {
-			err := l.streamAuth(str)
+			err := l.streamAuth(str, auth)
 			if err != nil {
 				// TODO logger print
 				return
@@ -145,7 +146,7 @@ func (l *StreamHandle) connHandle() {
 	}
 }
 
-func (l *StreamHandle) streamAuth(str quic.Stream) error {
+func (l *ConnectHandle) streamAuth(str quic.Stream, auth Authorizer) error {
 	defer str.Close()
 	msg, err := NewServerMessageParser(str)
 	if err != nil {
@@ -154,7 +155,7 @@ func (l *StreamHandle) streamAuth(str quic.Stream) error {
 	if msg.Type != Auth {
 		return errFirstConn
 	}
-	clientKey, authed, err := l.server.authorizer(msg.Body())
+	clientKey, authed, err := auth(msg.Body())
 	if err != nil {
 		return err
 	}
@@ -162,19 +163,22 @@ func (l *StreamHandle) streamAuth(str quic.Stream) error {
 		return errFailedAuth
 	}
 	if clientKey == "" {
-		clientKey = l.conn.RemoteAddr().String()
+		clientKey = l.Conn.RemoteAddr().String()
 	}
-	// TODO add to clients slice
+	// TODO add to clients session list
 	l.clientKey = clientKey
 	fmt.Println(clientKey)
 
 	return nil
 }
 
-func (l *StreamHandle) streamHandle(str quic.Stream) {
+func (l *ConnectHandle) streamHandle(str quic.Stream) {
 	defer str.Close()
 	msg, err := NewServerMessageParser(str)
 	if err != nil {
+		return
+	}
+	if !l.hijacker(msg, str) {
 		return
 	}
 	switch msg.Type {
@@ -193,7 +197,7 @@ func (l *StreamHandle) streamHandle(str quic.Stream) {
 	}
 }
 
-func (l *StreamHandle) keepAlive(str quic.Stream) {
+func (l *ConnectHandle) keepAlive(str quic.Stream) {
 	msg := NewPongMessage(int64(str.StreamID()), nil)
 	_, err := msg.WriteTo(str)
 	if err != nil {
@@ -213,5 +217,16 @@ func (l *StreamHandle) keepAlive(str quic.Stream) {
 			// TODO logger print
 			return
 		}
+	}
+}
+
+func (l *ConnectHandle) SetHijacker(hijacker Hijacker) *ConnectHandle {
+	l.hijacker = hijacker
+	return l
+}
+
+func (l *ConnectHandle) GetDialer() Dialer {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		return nil, nil
 	}
 }
