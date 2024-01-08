@@ -27,7 +27,7 @@ func ClientConnect(addr, auth string, tlsConfig TLSConfigurator, quicConfig Quic
 	streamHandle := &ConnectHandle{
 		Conn: conn,
 	}
-	go streamHandle.connHandle(func(msg []byte) (clientKey string, authed bool, err error) {
+	go streamHandle.ConnHandle(func(msg []byte) (clientKey string, authed bool, err error) {
 		return "local", true, err
 	})
 	return streamHandle, nil
