@@ -47,7 +47,7 @@ func (sm *clientsManager) getDialer(clientKey string) (Dialer, error) {
 	if len(clients) > 0 {
 		// TODO
 		return func(ctx context.Context, network, address string) (net.Conn, error) {
-			str, err := clients[0].OpenStreamSync(ctx)
+			str, err := clients[0].OpenStream()
 			if err != nil {
 				return nil, err
 			}
