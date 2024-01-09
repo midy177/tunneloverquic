@@ -261,7 +261,7 @@ func (l *ConnectHandle) SetHijacker(hijacker Hijacker) *ConnectHandle {
 
 func (l *ConnectHandle) GetDialer() Dialer {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		str, err := l.conn.OpenStreamSync(ctx)
+		str, err := l.conn.OpenStream()
 		if err != nil {
 			return nil, err
 		}
