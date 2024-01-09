@@ -63,7 +63,6 @@ func clientAuth(conn quic.Connection, auth []byte) error {
 	if err != nil {
 		return err
 	}
-	time.Sleep(time.Second)
 	buf := make([]byte, 1024)
 	n, err := str.Read(buf)
 	if err != nil && err != io.EOF {
@@ -94,7 +93,7 @@ func clientPing(conn quic.Connection) {
 		// TODO
 		return
 	}
-	buf := make([]byte, 64)
+	buf := make([]byte, 1024)
 	for {
 		n, err := str.Read(buf)
 		if err != nil {
@@ -103,7 +102,7 @@ func clientPing(conn quic.Connection) {
 		}
 		// TODO logger print
 		fmt.Printf("pong message: %s\n", string(buf[:n]))
-		time.Sleep(time.Second * 5)
+		time.Sleep(time.Second * 3)
 		_, err = str.Write([]byte("ping"))
 		if err != nil {
 			// TODO logger print

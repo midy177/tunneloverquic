@@ -6,7 +6,7 @@ import (
 )
 
 func main() {
-	_, err := tunneloverquic.ClientConnect("192.168.12.40:3000", []byte("adadjksjhfdfgh"), nil, nil)
+	_, err := tunneloverquic.ClientConnect("192.168.12.40:3001", []byte("adadjksjhfdfgh"), nil, nil)
 	if err != nil {
 		fmt.Println(err)
 		return

@@ -237,7 +237,7 @@ func (l *ConnectHandle) streamHandle(str quic.Stream) {
 
 func (l *ConnectHandle) pongKeepAlive(str quic.Stream) {
 	defer l.clients.Remove(l.clientKey)
-	buf := make([]byte, 64)
+	buf := make([]byte, 1024)
 	for {
 		_, err := str.Write([]byte("pong"))
 		if err != nil {
