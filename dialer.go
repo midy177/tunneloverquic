@@ -8,13 +8,13 @@ import (
 type Dialer func(ctx context.Context, network, address string) (net.Conn, error)
 
 func (s *Server) HasSession(clientKey string) bool {
-	_, err := s.Sessions.getDialer(clientKey)
+	_, err := s.clients.getDialer(clientKey)
 	return err == nil
 }
 
 func (s *Server) Dialer(clientKey string) Dialer {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		d, err := s.Sessions.getDialer(clientKey)
+		d, err := s.clients.getDialer(clientKey)
 		if err != nil {
 			return nil, err
 		}

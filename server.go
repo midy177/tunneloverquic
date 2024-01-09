@@ -64,7 +64,7 @@ func defaultTLSConfig() *tls.Config {
 type Server struct {
 	serverAddr string
 	hijacker   Hijacker
-	Sessions   SessionManager
+	clients    *clientsManager
 	authorizer Authorizer
 	tlsConfig  TLSConfigurator
 	quicConfig QuicConfigurator
@@ -73,10 +73,20 @@ type Server struct {
 func NewServer(addr string) *Server {
 	return &Server{
 		serverAddr: addr,
+		hijacker: func(msg *Message, str quic.Stream) (next bool) {
+			return true
+		},
+		clients:    newClientsManager(),
 		tlsConfig:  defaultTLSConfig,
 		quicConfig: defaultQuicConfig,
 	}
 }
+
+func (s *Server) SetHijacker(hijacker Hijacker) *Server {
+	s.hijacker = hijacker
+	return s
+}
+
 func (s *Server) SetAuthorizer(auth Authorizer) *Server {
 	s.authorizer = auth
 	return s
@@ -110,36 +120,44 @@ func (s *Server) Run() {
 
 func (s *Server) handle(conn quic.Connection) {
 	streamHandle := &ConnectHandle{
+		clients:  s.clients,
 		hijacker: s.hijacker,
-		Conn:     conn,
+		conn:     conn,
 	}
-	streamHandle.ConnHandle(true, s.authorizer)
+	streamHandle.connHandle(true, s.authorizer)
+}
+
+func (s *Server) GetDialer(clientKey string) (Dialer, error) {
+	return s.clients.getDialer(clientKey)
 }
 
 type ConnectHandle struct {
 	clientKey string
+	clients   *clientsManager
 	hijacker  Hijacker
-	Conn      quic.Connection
+	conn      quic.Connection
 }
 
-func (l *ConnectHandle) ConnHandle(first bool, auth Authorizer) {
+func (l *ConnectHandle) connHandle(first bool, auth Authorizer) {
+	firstConn := first
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for {
-		str, err := l.Conn.AcceptStream(ctx) // for bidirectional streams
+		str, err := l.conn.AcceptStream(ctx) // for bidirectional streams
 		var nerr net.Error
 		if errors.As(err, &nerr) && nerr.Timeout() {
 			// TODO logger print
 			return
 		}
 		// Execute as server runtime
-		if first {
+		if firstConn {
 			err := l.streamAuth(str, auth)
 			if err != nil {
+				_ = l.conn.CloseWithError(200, "server authorization failed")
 				// TODO logger print
 				return
 			}
-			first = false
+			firstConn = false
 		} else {
 			go l.streamHandle(str)
 		}
@@ -148,48 +166,62 @@ func (l *ConnectHandle) ConnHandle(first bool, auth Authorizer) {
 
 func (l *ConnectHandle) streamAuth(str quic.Stream, auth Authorizer) error {
 	defer str.Close()
-	msg, err := NewServerMessageParser(str)
+	msg, err := newServerMessageParser(str)
 	if err != nil {
 		return err
 	}
-	if msg.Type != Auth {
+	if msg.MessageType != Auth {
 		return errFirstConn
 	}
 	clientKey, authed, err := auth(msg.Body())
 	if err != nil {
+		_, _ = str.Write([]byte("failed"))
 		return err
 	}
 	if !authed {
+		_, _ = str.Write([]byte("failed"))
 		return errFailedAuth
 	}
-	if clientKey == "" {
-		clientKey = l.Conn.RemoteAddr().String()
+	_, err = str.Write([]byte("ok"))
+	if err != nil {
+		return err
 	}
-	// TODO add to clients session list
+	if clientKey == "" {
+		clientKey = l.conn.RemoteAddr().String()
+	}
+	// TODO add to clients clients list
+	l.clients.Add(clientKey, l.conn)
 	l.clientKey = clientKey
-	fmt.Println(clientKey)
-
 	return nil
 }
 
 func (l *ConnectHandle) streamHandle(str quic.Stream) {
-	defer str.Close()
-	msg, err := NewServerMessageParser(str)
+	defer func() {
+		_ = str.Close()
+		if r := recover(); r != nil {
+			fmt.Println("Recovered from panic:", r)
+		}
+	}()
+	msg, err := newServerMessageParser(str)
 	if err != nil {
 		return
 	}
 	if !l.hijacker(msg, str) {
 		return
 	}
-	switch msg.Type {
+	switch msg.MessageType {
 	case Auth:
 
 	case Connect:
-
+		err := clientDial(str, msg)
+		if err != nil {
+			// TODO
+			return
+		}
 	case Other:
 
 	case Ping:
-		l.keepAlive(str)
+		l.pongKeepAlive(str)
 	case Pong:
 
 	case Error:
@@ -197,26 +229,22 @@ func (l *ConnectHandle) streamHandle(str quic.Stream) {
 	}
 }
 
-func (l *ConnectHandle) keepAlive(str quic.Stream) {
-	msg := NewPongMessage(int64(str.StreamID()), nil)
-	_, err := msg.WriteTo(str)
-	if err != nil {
-		return
-	}
-	buf := make([]byte, 1024)
+func (l *ConnectHandle) pongKeepAlive(str quic.Stream) {
+	defer l.clients.Remove(l.clientKey)
+	buf := make([]byte, 64)
 	for {
-		n, err := str.Read(buf)
+		_, err := str.Write([]byte("pong"))
 		if err != nil {
+			// TODO logger print
+			return
+		}
+		n, err := str.Read(buf)
+		if err != nil && err.Error() != "EOF" {
 			// TODO logger print
 			return
 		}
 		// TODO logger print
-		fmt.Printf("received ping message: (%s) from client %s\n", string(buf[:n]), l.clientKey)
-		_, err = str.Write([]byte("pong"))
-		if err != nil {
-			// TODO logger print
-			return
-		}
+		fmt.Printf("received ping Message: (%s) from clientKey %s\n", string(buf[:n]), l.clientKey)
 	}
 }
 
@@ -227,6 +255,10 @@ func (l *ConnectHandle) SetHijacker(hijacker Hijacker) *ConnectHandle {
 
 func (l *ConnectHandle) GetDialer() Dialer {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		return nil, nil
+		str, err := l.conn.OpenStreamSync(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return newConnection(str, network, address)
 	}
 }

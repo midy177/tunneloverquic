@@ -21,48 +21,48 @@ const (
 )
 
 type Message struct {
-	connID  int64
-	Type    messageType
-	bytes   []byte
-	Proto   string
-	Address string
+	connID      int64
+	MessageType messageType
+	bytes       []byte
+	Proto       string
+	Address     string
 }
 
-func NewAuthMessage(connID int64, data []byte) *Message {
+func newAuthMessage(connID int64, data []byte) *Message {
 	return &Message{
-		connID: connID,
-		Type:   Auth,
-		bytes:  data,
+		connID:      connID,
+		MessageType: Auth,
+		bytes:       data,
 	}
 }
 
-func NewConnectMessage(connID int64, proto, address string) *Message {
+func newConnectMessage(connID int64, proto, address string) *Message {
 	return &Message{
-		connID:  connID,
-		Type:    Connect,
-		bytes:   []byte(fmt.Sprintf("%s/%s", proto, address)),
-		Proto:   proto,
-		Address: address,
+		connID:      connID,
+		MessageType: Connect,
+		bytes:       []byte(fmt.Sprintf("%s/%s", proto, address)),
+		Proto:       proto,
+		Address:     address,
 	}
 }
 
-func NewPingMessage(connID int64, data []byte) *Message {
+func newPingMessage(connID int64, data []byte) *Message {
 	return &Message{
-		connID: connID,
-		Type:   Ping,
-		bytes:  data,
+		connID:      connID,
+		MessageType: Ping,
+		bytes:       data,
 	}
 }
 
-func NewPongMessage(connID int64, data []byte) *Message {
+func newPongMessage(connID int64, data []byte) *Message {
 	return &Message{
-		connID: connID,
-		Type:   Pong,
-		bytes:  data,
+		connID:      connID,
+		MessageType: Pong,
+		bytes:       data,
 	}
 }
 
-func NewServerMessageParser(reader io.Reader) (*Message, error) {
+func newServerMessageParser(reader io.Reader) (*Message, error) {
 	buf := bufio.NewReader(reader)
 
 	connID, err := binary.ReadVarint(buf)
@@ -76,8 +76,8 @@ func NewServerMessageParser(reader io.Reader) (*Message, error) {
 	}
 
 	m := &Message{
-		Type:   messageType(mType),
-		connID: connID,
+		MessageType: messageType(mType),
+		connID:      connID,
 	}
 	// 获取数据部分缓冲区大小
 	space, err := binary.ReadVarint(buf)
@@ -90,7 +90,7 @@ func NewServerMessageParser(reader io.Reader) (*Message, error) {
 		return nil, err
 	}
 	m.bytes = bytes
-	if m.Type == Connect {
+	if m.MessageType == Connect {
 		parts := strings.SplitN(string(bytes), "/", 2)
 		if len(parts) != 2 {
 			return nil, fmt.Errorf("failed to parse connect Address")
@@ -123,7 +123,7 @@ func (m *Message) header(buf []byte) int {
 
 	// 将各种头部信息写入缓冲区
 	offset += binary.PutVarint(buf[offset:], m.connID)
-	offset += binary.PutVarint(buf[offset:], int64(m.Type))
+	offset += binary.PutVarint(buf[offset:], int64(m.MessageType))
 	offset += binary.PutVarint(buf[offset:], int64(len(m.bytes)))
 
 	return offset
@@ -137,8 +137,8 @@ func (m *Message) WriteTo(str quic.Stream) (int, error) {
 	return len(m.bytes), err
 }
 
-func (m *Message) String() string {
-	switch m.Type {
+func (m *Message) ToString() string {
+	switch m.MessageType {
 	case Auth:
 		return fmt.Sprintf("AUTH    [%d]: %s", m.connID, string(m.bytes))
 	case Connect:
@@ -146,6 +146,14 @@ func (m *Message) String() string {
 	case Other:
 		return fmt.Sprintf("OTHER   [%d]: %s", m.connID, string(m.bytes))
 	default:
-		return fmt.Sprintf("UNKNOWN [%d]: %d", m.connID, m.Type)
+		return fmt.Sprintf("UNKNOWN [%d]: %d", m.connID, m.MessageType)
 	}
+}
+
+func (m *Message) Network() string {
+	return m.Proto
+}
+
+func (m *Message) String() string {
+	return m.Address
 }

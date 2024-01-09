@@ -1,8 +1,10 @@
 package tunneloverquic
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"github.com/quic-go/quic-go"
 	"time"
@@ -19,68 +21,79 @@ func ClientConnect(addr string, auth []byte, tlsConfig TLSConfigurator, quicConf
 			}
 		}
 	}
+	if quicConfig == nil {
+		quicConfig = func() *quic.Config {
+			return nil
+		}
+	}
 	conn, err := quic.DialAddr(ctx, addr, tlsConfig(), quicConfig())
 	if err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
-	streamHandle := &ConnectHandle{
-		Conn: conn,
-	}
 
+	err = clientAuth(conn, auth)
+	if err != nil {
+		return nil, err
+	}
 	go clientPing(conn)
-	go streamHandle.ConnHandle(false, func(msg []byte) (clientKey string, authed bool, err error) {
+
+	streamHandle := &ConnectHandle{
+		conn: conn,
+	}
+	streamHandle.SetHijacker(func(msg *Message, str quic.Stream) (next bool) {
+		return true
+	})
+	go streamHandle.connHandle(false, func(msg []byte) (clientKey string, authed bool, err error) {
 		return "local", true, err
 	})
 	return streamHandle, nil
 }
 
-func clientAuth(conn quic.Connection, auth []byte) {
+func clientAuth(conn quic.Connection, auth []byte) error {
 	str, err := conn.OpenStream()
 	if err != nil {
-		return
+		return err
 	}
 	defer func(str quic.Stream) {
 		_ = str.Close()
-		_ = conn.CloseWithError(200, "sending a ping message expecting a pong reply, but the reply is not a pong message.")
 	}(str)
-	msg := NewAuthMessage(int64(str.StreamID()), auth)
+	msg := newAuthMessage(int64(str.StreamID()), auth)
 	_, err = msg.WriteTo(str)
 	if err != nil {
-		return
+		return err
 	}
+	time.Sleep(time.Second)
 	buf := make([]byte, 1024)
 	n, err := str.Read(buf)
-	if err != nil {
-		return
+	if err != nil && err.Error() != "EOF" {
+		return err
 	}
+	if !bytes.Equal(buf[:n], []byte("ok")) {
+		return errors.New("server authorization failed")
+	}
+	fmt.Println("server authorization ok.")
+	return nil
 }
 
 func clientPing(conn quic.Connection) {
+	defer func(conn quic.Connection) {
+		_ = conn.CloseWithError(200, "sending a ping Message expecting a pong reply, but the reply is not a pong Message.")
+	}(conn)
+
 	str, err := conn.OpenStream()
 	if err != nil {
 		return
 	}
 	defer func(str quic.Stream) {
 		_ = str.Close()
-		_ = conn.CloseWithError(200, "sending a ping message expecting a pong reply, but the reply is not a pong message.")
 	}(str)
-	msg := NewPingMessage(int64(str.StreamID()), nil)
+	msg := newPingMessage(int64(str.StreamID()), nil)
 	_, err = msg.WriteTo(str)
 	if err != nil {
 		// TODO
 		return
 	}
-	parser, err := NewServerMessageParser(str)
-	if err != nil {
-		// TODO
-		return
-	}
-	if parser.Type != Pong {
-		// TODO
-		return
-	}
-	buf := make([]byte, 1024)
+	buf := make([]byte, 64)
 	for {
 		n, err := str.Read(buf)
 		if err != nil {
@@ -88,7 +101,7 @@ func clientPing(conn quic.Connection) {
 			return
 		}
 		// TODO logger print
-		fmt.Printf("received ping message: (%s) from client \n", string(buf[:n]))
+		fmt.Printf("received pong Message: (%s) from clientKey \n", string(buf[:n]))
 		_, err = str.Write([]byte("ping"))
 		if err != nil {
 			// TODO logger print

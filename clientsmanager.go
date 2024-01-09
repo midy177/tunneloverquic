@@ -8,24 +8,24 @@ import (
 	"sync"
 )
 
-type SessionManager struct {
+type clientsManager struct {
 	sync.Mutex
 	clients map[string][]quic.Connection
 }
 
-func NewSessionManager() *SessionManager {
-	return &SessionManager{
+func newClientsManager() *clientsManager {
+	return &clientsManager{
 		clients: map[string][]quic.Connection{},
 	}
 }
 
-func (sm *SessionManager) Add(clientKey string, conn quic.Connection) {
+func (sm *clientsManager) Add(clientKey string, conn quic.Connection) {
 	sm.Lock()
 	defer sm.Unlock()
 	sm.clients[clientKey] = append(sm.clients[clientKey], conn)
 }
 
-func (sm *SessionManager) Remove(clientKey string) {
+func (sm *clientsManager) Remove(clientKey string) {
 	sm.Lock()
 	defer sm.Unlock()
 
@@ -39,7 +39,7 @@ func (sm *SessionManager) Remove(clientKey string) {
 	delete(sm.clients, clientKey)
 }
 
-func (sm *SessionManager) getDialer(clientKey string) (Dialer, error) {
+func (sm *clientsManager) getDialer(clientKey string) (Dialer, error) {
 	sm.Lock()
 	defer sm.Unlock()
 
