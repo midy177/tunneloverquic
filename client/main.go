@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/quic-go/quic-go"
 	"time"
+	"tunneloverquic"
 )
 
 func main() {
@@ -34,4 +35,5 @@ func main() {
 		}
 		time.Sleep(time.Second)
 	}
+	tunneloverquic.ClientConnect("172.31.109.4:3000", "", nil, nil)
 }

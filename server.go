@@ -113,7 +113,7 @@ func (s *Server) handle(conn quic.Connection) {
 		hijacker: s.hijacker,
 		Conn:     conn,
 	}
-	streamHandle.ConnHandle(s.authorizer)
+	streamHandle.ConnHandle(true, s.authorizer)
 }
 
 type ConnectHandle struct {
@@ -122,8 +122,7 @@ type ConnectHandle struct {
 	Conn      quic.Connection
 }
 
-func (l *ConnectHandle) ConnHandle(auth Authorizer) {
-	first := true
+func (l *ConnectHandle) ConnHandle(first bool, auth Authorizer) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for {
@@ -133,6 +132,7 @@ func (l *ConnectHandle) ConnHandle(auth Authorizer) {
 			// TODO logger print
 			return
 		}
+		// Execute as server runtime
 		if first {
 			err := l.streamAuth(str, auth)
 			if err != nil {
