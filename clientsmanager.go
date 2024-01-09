@@ -28,7 +28,7 @@ func (sm *clientsManager) Add(clientKey string, conn quic.Connection) {
 func (sm *clientsManager) Remove(clientKey string) {
 	sm.Lock()
 	defer sm.Unlock()
-
+	fmt.Println("remove the client of: " + clientKey)
 	for _, v := range sm.clients[clientKey] {
 		err := v.CloseWithError(200, "the server actively removes the connection.")
 		if err != nil {
@@ -43,11 +43,15 @@ func (sm *clientsManager) getDialer(clientKey string) (Dialer, error) {
 	sm.Lock()
 	defer sm.Unlock()
 
-	sessions := sm.clients[clientKey]
-	if len(sessions) > 0 {
+	clients := sm.clients[clientKey]
+	if len(clients) > 0 {
 		// TODO
 		return func(ctx context.Context, network, address string) (net.Conn, error) {
-			return nil, nil
+			str, err := clients[0].OpenStreamSync(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return newConnection(str, network, address)
 		}, nil
 	}
 

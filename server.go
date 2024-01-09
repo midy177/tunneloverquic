@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/quic-go/quic-go"
+	"io"
 	"log"
 	"math/big"
 	"net"
@@ -144,8 +145,7 @@ func (l *ConnectHandle) connHandle(first bool, auth Authorizer) {
 	defer cancel()
 	for {
 		str, err := l.conn.AcceptStream(ctx) // for bidirectional streams
-		var nerr net.Error
-		if errors.As(err, &nerr) && nerr.Timeout() {
+		if err != nil {
 			// TODO logger print
 			return
 		}
@@ -165,6 +165,11 @@ func (l *ConnectHandle) connHandle(first bool, auth Authorizer) {
 }
 
 func (l *ConnectHandle) streamAuth(str quic.Stream, auth Authorizer) error {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered from panic:", r)
+		}
+	}()
 	defer str.Close()
 	msg, err := newServerMessageParser(str)
 	if err != nil {
@@ -197,11 +202,11 @@ func (l *ConnectHandle) streamAuth(str quic.Stream, auth Authorizer) error {
 
 func (l *ConnectHandle) streamHandle(str quic.Stream) {
 	defer func() {
-		_ = str.Close()
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
 		}
 	}()
+	defer str.Close()
 	msg, err := newServerMessageParser(str)
 	if err != nil {
 		return
@@ -213,6 +218,7 @@ func (l *ConnectHandle) streamHandle(str quic.Stream) {
 	case Auth:
 
 	case Connect:
+		fmt.Printf("clientKey %s -> proto: %s address: %s\n", l.clientKey, msg.Proto, msg.Address)
 		err := clientDial(str, msg)
 		if err != nil {
 			// TODO
@@ -238,13 +244,13 @@ func (l *ConnectHandle) pongKeepAlive(str quic.Stream) {
 			// TODO logger print
 			return
 		}
-		n, err := str.Read(buf)
-		if err != nil && err.Error() != "EOF" {
+		_, err = str.Read(buf)
+		if err != nil && err != io.EOF {
 			// TODO logger print
 			return
 		}
 		// TODO logger print
-		fmt.Printf("received ping Message: (%s) from clientKey %s\n", string(buf[:n]), l.clientKey)
+		//fmt.Printf("received ping Message: (%s) from clientKey %s\n", string(buf[:n]), l.clientKey)
 	}
 }
 

@@ -47,13 +47,13 @@ func (c *connection) RemoteAddr() net.Addr {
 }
 
 func (c *connection) SetDeadline(t time.Time) error {
-	return nil
+	return c.stream.SetDeadline(t)
 }
 
 func (c *connection) SetReadDeadline(t time.Time) error {
-	return nil
+	return c.stream.SetReadDeadline(t)
 }
 
 func (c *connection) SetWriteDeadline(t time.Time) error {
-	return nil
+	return c.stream.SetWriteDeadline(t)
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/quic-go/quic-go"
+	"io"
 	"time"
 )
 
@@ -65,7 +66,7 @@ func clientAuth(conn quic.Connection, auth []byte) error {
 	time.Sleep(time.Second)
 	buf := make([]byte, 1024)
 	n, err := str.Read(buf)
-	if err != nil && err.Error() != "EOF" {
+	if err != nil && err != io.EOF {
 		return err
 	}
 	if !bytes.Equal(buf[:n], []byte("ok")) {
@@ -101,12 +102,12 @@ func clientPing(conn quic.Connection) {
 			return
 		}
 		// TODO logger print
-		fmt.Printf("received pong Message: (%s) from clientKey \n", string(buf[:n]))
+		fmt.Printf("pong message: %s\n", string(buf[:n]))
+		time.Sleep(time.Second * 5)
 		_, err = str.Write([]byte("ping"))
 		if err != nil {
 			// TODO logger print
 			return
 		}
-		time.Sleep(time.Second * 5)
 	}
 }
