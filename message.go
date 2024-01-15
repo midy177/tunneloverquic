@@ -107,14 +107,15 @@ func (m *Message) Body() []byte {
 }
 
 func (m *Message) Bytes() []byte {
-	// 计算所需缓冲区大小
-	space := len(m.bytes)
-	buf := make([]byte, 24+space)
-	// 头部数据的偏移量
+	bytesLength := len(m.bytes)
+	space := bytesLength + 24
+	// Calculate required buffer size
+	buf := make([]byte, space)
+	// offset of header data
 	offset := m.header(buf)
-	// 将消息数据拷贝到缓冲区
+	// Copy message data to buffer
 	copy(buf[offset:], m.bytes)
-	return buf
+	return buf[:offset+bytesLength]
 }
 
 func (m *Message) header(buf []byte) int {

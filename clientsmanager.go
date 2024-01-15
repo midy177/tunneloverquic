@@ -22,6 +22,7 @@ func newClientsManager() *clientsManager {
 func (sm *clientsManager) Add(clientKey string, conn quic.Connection) {
 	sm.Lock()
 	defer sm.Unlock()
+	fmt.Println("add client %s" + clientKey)
 	sm.clients[clientKey] = append(sm.clients[clientKey], conn)
 }
 
@@ -46,11 +47,12 @@ func (sm *clientsManager) getDialer(clientKey string) (Dialer, error) {
 	clients := sm.clients[clientKey]
 	if len(clients) > 0 {
 		// TODO
+		str, err := clients[0].OpenStreamSync(context.TODO())
+		if err != nil {
+			sm.Remove(clientKey)
+			return nil, err
+		}
 		return func(ctx context.Context, network, address string) (net.Conn, error) {
-			str, err := clients[0].OpenStream()
-			if err != nil {
-				return nil, err
-			}
 			return newConnection(str, network, address)
 		}, nil
 	}

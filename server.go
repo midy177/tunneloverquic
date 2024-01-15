@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/quic-go/quic-go"
-	"io"
 	"log"
 	"math/big"
 	"net"
@@ -143,6 +142,8 @@ func (l *ConnectHandle) connHandle(first bool, auth Authorizer) {
 	firstConn := first
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	defer l.clients.Remove(l.clientKey)
+	l.conn.ConnectionState()
 	for {
 		str, err := l.conn.AcceptStream(ctx) // for bidirectional streams
 		if err != nil {
@@ -226,31 +227,12 @@ func (l *ConnectHandle) streamHandle(str quic.Stream) {
 		}
 	case Other:
 
-	case Ping:
-		l.pongKeepAlive(str)
 	case Pong:
 
 	case Error:
+	default:
+		return
 
-	}
-}
-
-func (l *ConnectHandle) pongKeepAlive(str quic.Stream) {
-	defer l.clients.Remove(l.clientKey)
-	buf := make([]byte, 1024)
-	for {
-		_, err := str.Write([]byte("pong"))
-		if err != nil {
-			// TODO logger print
-			return
-		}
-		_, err = str.Read(buf)
-		if err != nil && err != io.EOF {
-			// TODO logger print
-			return
-		}
-		// TODO logger print
-		//fmt.Printf("received ping Message: (%s) from clientKey %s\n", string(buf[:n]), l.clientKey)
 	}
 }
 
@@ -259,12 +241,13 @@ func (l *ConnectHandle) SetHijacker(hijacker Hijacker) *ConnectHandle {
 	return l
 }
 
-func (l *ConnectHandle) GetDialer() Dialer {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		str, err := l.conn.OpenStream()
-		if err != nil {
-			return nil, err
-		}
-		return newConnection(str, network, address)
+func (l *ConnectHandle) GetDialer() (Dialer, error) {
+	str, err := l.conn.OpenStreamSync(context.TODO())
+	if err != nil {
+		l.clients.Remove(l.clientKey)
+		return nil, err
 	}
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		return newConnection(str, network, address)
+	}, nil
 }

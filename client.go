@@ -24,7 +24,9 @@ func ClientConnect(addr string, auth []byte, tlsConfig TLSConfigurator, quicConf
 	}
 	if quicConfig == nil {
 		quicConfig = func() *quic.Config {
-			return nil
+			return &quic.Config{
+				KeepAlivePeriod: time.Second * 5,
+			}
 		}
 	}
 	conn, err := quic.DialAddr(ctx, addr, tlsConfig(), quicConfig())
@@ -36,8 +38,6 @@ func ClientConnect(addr string, auth []byte, tlsConfig TLSConfigurator, quicConf
 	if err != nil {
 		return nil, err
 	}
-	go clientPing(conn)
-
 	streamHandle := &ConnectHandle{
 		conn: conn,
 	}
@@ -73,40 +73,4 @@ func clientAuth(conn quic.Connection, auth []byte) error {
 	}
 	fmt.Println("server authorization ok.")
 	return nil
-}
-
-func clientPing(conn quic.Connection) {
-	defer func(conn quic.Connection) {
-		_ = conn.CloseWithError(200, "sending a ping Message expecting a pong reply, but the reply is not a pong Message.")
-	}(conn)
-
-	str, err := conn.OpenStream()
-	if err != nil {
-		return
-	}
-	defer func(str quic.Stream) {
-		_ = str.Close()
-	}(str)
-	msg := newPingMessage(int64(str.StreamID()), nil)
-	_, err = msg.WriteTo(str)
-	if err != nil {
-		// TODO
-		return
-	}
-	buf := make([]byte, 1024)
-	for {
-		n, err := str.Read(buf)
-		if err != nil {
-			// TODO logger print
-			return
-		}
-		// TODO logger print
-		fmt.Printf("pong message: %s\n", string(buf[:n]))
-		time.Sleep(time.Second * 3)
-		_, err = str.Write([]byte("ping"))
-		if err != nil {
-			// TODO logger print
-			return
-		}
-	}
 }

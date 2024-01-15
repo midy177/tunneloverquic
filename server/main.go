@@ -21,7 +21,7 @@ func main() {
 		if err != nil {
 			continue
 		}
-		doHttpClient(dialer)
+		go doHttpClient(dialer)
 	}
 }
 
